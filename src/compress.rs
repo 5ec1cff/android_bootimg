@@ -1,12 +1,10 @@
-use std::cmp::min;
-use std::io;
-use std::io::Read;
-use std::mem::MaybeUninit;
-use bytemuck::{bytes_of_mut, Pod};
+use crate::utils::ReadExt;
 use bzip2::read::BzDecoder;
 use flate2::read::MultiGzDecoder;
+use lz4::Decoder as LZ4FrameDecoder;
 use lzma_rust2::{LzmaReader, XzReader};
-use lz4::{Decoder as LZ4FrameDecoder};
+use std::cmp::min;
+use std::io::Read;
 
 const GZIP1_MAGIC: &[u8] = b"\x1f\x8b";
 const GZIP2_MAGIC: &[u8] = b"\x1f\x9e";
@@ -76,27 +74,6 @@ pub fn parse_compress_format(data: &[u8]) -> CompressFormat {
 
 
 
-pub trait ReadExt {
-    fn skip(&mut self, len: usize) -> io::Result<()>;
-    fn read_pod<F: Pod>(&mut self, data: &mut F) -> io::Result<()>;
-}
-
-impl<T: Read> ReadExt for T {
-    fn skip(&mut self, mut len: usize) -> io::Result<()> {
-        let mut buf = MaybeUninit::<[u8; 4096]>::uninit();
-        let buf = unsafe { buf.assume_init_mut() };
-        while len > 0 {
-            let l = min(buf.len(), len);
-            self.read_exact(&mut buf[..l])?;
-            len -= l;
-        }
-        Ok(())
-    }
-
-    fn read_pod<F: Pod>(&mut self, data: &mut F) -> io::Result<()> {
-        self.read_exact(bytes_of_mut(data))
-    }
-}
 
 // LZ4BlockArchive format
 //

@@ -1,4 +1,3 @@
-use anyhow::{bail, Result};
 use paste::paste;
 
 use crate::constants::{BOOT_ARGS_SIZE, BOOT_EXTRA_ARGS_SIZE, BOOT_ID_SIZE, BOOT_NAME_SIZE, VENDOR_BOOT_ARGS_SIZE};
@@ -18,54 +17,6 @@ macro_rules! def_boot_header_layout {
                     pub [<size_ $name2>]: u16,
                 )+
                 pub total_size: u16
-            }
-
-            #[allow(unused)]
-            impl BootHeaderLayout {
-                $(
-                    pub fn [<has_ $name>](&self) -> bool {
-                        return self.[<offset_ $name>] != 0;
-                    }
-                    pub fn [<get_ $name _unchecked>](&self, arr: &[u8]) -> $t {
-                        let offset = self.[<offset_ $name>] as usize;
-                        return $t::from_le_bytes(arr[offset..offset + 4].try_into().unwrap());
-                    }
-                    pub fn [<get_ $name>](&self, arr: &[u8]) -> Result<$t> {
-                        let offset = self.[<offset_ $name>] as usize;
-                        if offset != 0 {
-                            if let Some(data) = arr.get(offset..offset + 4) {
-                                return Ok($t::from_le_bytes(data.try_into()?));
-                            }
-                        } else {
-                            bail!("Use undefined field {}", stringify!($name));
-                        }
-
-                        bail!("Invalid offset 0x{:08x} field {}", offset, stringify!($name))
-                    }
-                )+
-                $(
-                    pub fn [<has_ $name2>](&self) -> bool {
-                        return self.[<offset_ $name2>] != 0;
-                    }
-                    pub fn [<get_ $name2 _unchecked>]<'a>(&self, arr: &'a [u8]) -> &'a [u8] {
-                        let offset = self.[<offset_ $name2>] as usize;
-                        let sz = self.[<size_ $name2>] as usize;
-                        return &arr[offset..offset + sz];
-                    }
-                    pub fn [<get_ $name2>]<'a>(&self, arr: &'a [u8]) -> Result<&'a [u8]> {
-                        let offset = self.[<offset_ $name2>] as usize;
-                        let sz = self.[<size_ $name2>] as usize;
-                        if offset != 0 {
-                            if let Some(data) = arr.get(offset..offset + sz) {
-                                return Ok(data);
-                            }
-                        } else {
-                            bail!("Use undefined field {}", stringify!($name2));
-                        }
-                        bail!("Invalid offset 0x{:08x} field {}", offset, stringify!($name2))
-                    }
-                )+
-
             }
 
             #[allow(unused)]
