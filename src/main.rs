@@ -4,18 +4,18 @@ mod constants;
 mod utils;
 
 use crate::compress::{get_decoder, parse_compress_format, CompressFormat};
-use crate::layouts::{BootHeaderLayout, BOOT_HEADER_V0, BOOT_HEADER_V1, BOOT_HEADER_V2, BOOT_HEADER_V3, BOOT_HEADER_V4, VENDOR_BOOT_HEADER_V3, VENDOR_BOOT_HEADER_V4};
-use crate::utils::{align_to, ReadExt};
+use crate::layouts::{BootHeaderLayout, VendorRamdiskTableEntryV4, BOOT_HEADER_V0, BOOT_HEADER_V1, BOOT_HEADER_V2, BOOT_HEADER_V3, BOOT_HEADER_V4, VENDOR_BOOT_HEADER_V3, VENDOR_BOOT_HEADER_V4};
+use crate::utils::{align_to, SliceExt};
 use crate::BootImageVersion::{Android, Vendor};
 use anyhow::{bail, Result};
 use memmap2::Mmap;
 use paste::paste;
-use std::cmp::PartialEq;
 use std::env;
 use std::fmt::{Display, Formatter};
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::ops::{Deref, DerefMut};
+use std::str::from_utf8;
 
 const BOOT_MAGIC: &[u8] = b"ANDROID!";
 const VENDOR_BOOT_MAGIC: &[u8] = b"VNDRBOOT";
@@ -43,7 +43,6 @@ impl Display for PatchLevel {
     }
 }
 
-
 #[derive(Debug)]
 enum BootImageVersion {
     Android(u32),
@@ -66,7 +65,7 @@ macro_rules! impl_ifield_accessor {
             #[allow(unused)]
             $vis fn [<get_ $name $($suffix)?>](&self) -> $t {
                 let offset = self.layout.[<offset_ $name>] as usize;
-                return $t::from_le_bytes(self.data[offset..offset + 4].try_into().unwrap());
+                return $t::from_le_bytes(self.data[offset..offset + size_of::<$t>()].try_into().unwrap());
             }
         }
     };
@@ -143,53 +142,48 @@ impl<'a> BootHeader<'a> {
 
     pub fn hdr_space(&self) -> usize {
         // TODO: only vendor boot has page count > 1
+        println!("ver: {:?}", self.version);
         align_to(self.layout.total_size as usize, self.page_size())
     }
 
     pub fn parse(data: &'a [u8]) -> Result<Self> {
         if data.starts_with(BOOT_MAGIC) {
-            let mut version = u32::MAX;
-            let mut tmp = data;
-            tmp.skip(BOOT_HEADER_V0.offset_header_version as usize)?;
-            tmp.read_pod(&mut version)?;
+            if let Some(version) =  data.u32_at(BOOT_HEADER_V0.offset_header_version as usize) {
+                let layout = match version {
+                    0 => &BOOT_HEADER_V0,
+                    1 => &BOOT_HEADER_V1,
+                    2 => &BOOT_HEADER_V2,
+                    3 => &BOOT_HEADER_V3,
+                    4 => &BOOT_HEADER_V4,
+                    _ => bail!("unsupported boot version {}", version)
+                };
 
-            let layout = match version {
-                0 => &BOOT_HEADER_V0,
-                1 => &BOOT_HEADER_V1,
-                2 => &BOOT_HEADER_V2,
-                3 => &BOOT_HEADER_V3,
-                4 => &BOOT_HEADER_V4,
-                _ => bail!("unsupported boot version {}", version)
-            };
+                let data = &data[..layout.total_size as usize];
 
-            let data = &data[..layout.total_size as usize];
-
-            Ok(Self {
-                data,
-                layout,
-                version: Android(version),
-            })
+                return Ok(Self {
+                    data,
+                    layout,
+                    version: Android(version),
+                });
+            }
         } else if data.starts_with(VENDOR_BOOT_MAGIC) {
-            let mut version = u32::MAX;
-            let mut tmp = data;
-            tmp.skip(VENDOR_BOOT_HEADER_V3.offset_header_version as usize)?;
-            tmp.read_pod(&mut version)?;
-            let layout = match version {
-                3 => &VENDOR_BOOT_HEADER_V3,
-                4 => &VENDOR_BOOT_HEADER_V4,
-                _ => bail!("unsupported vendor boot version {}", version)
-            };
+            if let Some(version) =  data.u32_at(VENDOR_BOOT_HEADER_V3.offset_header_version as usize) {
+                let layout = match version {
+                    3 => &VENDOR_BOOT_HEADER_V3,
+                    4 => &VENDOR_BOOT_HEADER_V4,
+                    _ => bail!("unsupported vendor boot version {}", version)
+                };
 
-            let data = &data[..layout.total_size as usize];
+                let data = &data[..layout.total_size as usize];
 
-            Ok(Self {
-                data,
-                layout,
-                version: Vendor(version),
-            })
-        } else {
-            bail!("invalid boot image")
+                return Ok(Self {
+                    data,
+                    layout,
+                    version: Vendor(version),
+                });
+            }
         }
+        bail!("invalid boot image")
     }
 }
 
@@ -205,8 +199,10 @@ struct BootImageBlocks<'a> {
     bootconfig: Option<&'a [u8]>,
 }
 
+type S<'a> = &'a [u8; 4];
+
 impl<'a> BootImageBlocks<'a> {
-    pub fn new(data: &'a [u8], boot_header: &BootHeader) -> Result<Self> {
+    pub fn parse(data: &'a [u8], boot_header: &BootHeader) -> Result<(Self, usize)> {
         let mut off = boot_header.hdr_space();
         let page_size = boot_header.page_size();
 
@@ -234,7 +230,7 @@ impl<'a> BootImageBlocks<'a> {
                         };
                     )*
 
-                    Ok(BootImageBlocks { $($name),* })
+                    Ok((BootImageBlocks { $($name),* }, off))
                 }
             }
         }
@@ -251,39 +247,84 @@ impl<'a> BootImageBlocks<'a> {
             bootconfig
         }
     }
+}
 
-    fn dump_kernel(&self, out: &mut dyn Write, raw: bool) -> Result<()> {
-        if let Some(mut kernel) = self.kernel {
-            if raw {
-                std::io::copy(&mut kernel, out)?;
-            } else {
-                let format = parse_compress_format(kernel);
-                if format != CompressFormat::UNKNOWN {
-                    let mut decoder = get_decoder(format, kernel)?;
-                    std::io::copy(decoder.as_mut(), out)?;
-                } else {
-                    std::io::copy(&mut kernel, out)?;
-                }
-            }
-        }
-
-        Ok(())
-    }
+struct VendorRamdiskTableEntry<'a> {
+    data: &'a [u8],
+    entry: VendorRamdiskTableEntryV4<'a>,
 }
 
 struct BootImage<'a> {
     data: &'a [u8],
     header: BootHeader<'a>,
     blocks: BootImageBlocks<'a>,
+    vendor_ramdisk_table: Option<Vec<VendorRamdiskTableEntry<'a>>>,
+}
+
+fn dump_block(data: &[u8], out: &mut dyn Write, raw: bool) -> Result<()> {
+    let mut data = data;
+    if !raw {
+        let format = parse_compress_format(data);
+        if format != CompressFormat::UNKNOWN {
+            let mut decoder = get_decoder(format, data)?;
+            std::io::copy(decoder.as_mut(), out)?;
+            std::io::copy(&mut data, out)?;
+            return Ok(());
+        }
+    }
+    std::io::copy(&mut data, out)?;
+
+    Ok(())
 }
 
 impl<'a> BootImage<'a> {
     pub fn parse(data: &'a [u8]) -> Result<Self> {
         let header = BootHeader::parse(data)?;
-        let blocks = BootImageBlocks::new(data, &header)?;
+        let (blocks, tail) = BootImageBlocks::parse(data, &header)?;
 
-        Ok(Self { data, header, blocks })
+        let vendor_ramdisk_table = if let Some(entry_table) = blocks.vendor_ramdisk_table {
+            let entry_size = header.get_vendor_ramdisk_table_entry_size() as usize;
+            if entry_size != VendorRamdiskTableEntryV4::SIZE {
+                bail!("invalid vendor ramdisk table entry size: {}", entry_size);
+            }
+
+            let entry_table_size = header.get_vendor_ramdisk_table_entry_num() as usize * entry_size;
+
+            if entry_table.len() < entry_table_size {
+                bail!("invalid vendor ramdisk table entry size: {}", entry_table.len());
+            }
+
+            let entry_table = &entry_table[..entry_table_size];
+
+            if blocks.ramdisk.is_none() {
+                bail!("missing ramdisk")
+            }
+
+            let ramdisk = blocks.ramdisk.unwrap();
+
+            let mut vec = Vec::new();
+            for d in entry_table.chunks(entry_size) {
+                let entry_v4 = VendorRamdiskTableEntryV4 { data: d };
+
+                let off = entry_v4.get_ramdisk_offset() as usize;
+                let sz = entry_v4.get_ramdisk_size() as usize;
+                if let Some(data) = ramdisk.get(off..off + sz) {
+                    vec.push(VendorRamdiskTableEntry {
+                        data, entry: entry_v4
+                    })
+                } else {
+                    bail!("invalid vendor ramdisk entry off={} size={}", off, sz);
+                }
+            }
+
+            Some(vec)
+        } else {
+            None
+        };
+
+        Ok(Self { data, header, blocks, vendor_ramdisk_table })
     }
+
 
     fn print_info(&self) -> Result<()> {
         macro_rules! print_info_item {
@@ -324,6 +365,10 @@ impl<'a> BootImage<'a> {
     }
 }
 
+fn trim_end(data: &[u8]) -> &[u8] {
+    &data[..data.iter().position(|&b| b == 0).unwrap_or(data.len())]
+}
+
 fn main() -> Result<()> {
     if let Some(s) = env::args().skip(1).next() {
         let file = File::open(s)?;
@@ -333,14 +378,37 @@ fn main() -> Result<()> {
         println!("version: {:?}", boot.header.version);
         println!("layout: {:?}", boot.header.layout);
         boot.print_info()?;
+
+        fn dump_block_to_file(block: &[u8], name: &str) -> Result<()> {
+            let mut output = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(name)?;
+            dump_block(block, &mut output, false)
+        }
+
         if let Some(kernel) = boot.blocks.kernel {
             let fmt = parse_compress_format(kernel);
             println!("kernel format: {:?}", fmt);
+            dump_block_to_file(kernel, "kernel")?;
         }
 
-        if let Some(ramdisk) = boot.blocks.ramdisk {
+        if let Some(table) = &boot.vendor_ramdisk_table {
+            println!("vendor ramdisk table");
+            for t in table {
+                if let Ok(name) = from_utf8(trim_end(t.entry.get_ramdisk_name())) {
+                    println!("name: {}", name);
+                    println!("type: {:?}", t.entry.get_ramdisk_type());
+                    dump_block_to_file(t.data, &format!("vendor.{}.cpio", name))?;
+                } else {
+                    println!("invalid ramdisk name: {:?}", t.entry.get_ramdisk_name());
+                }
+            }
+        } else if let Some(ramdisk) = boot.blocks.ramdisk {
             let fmt = parse_compress_format(ramdisk);
             println!("ramdisk format: {:?}", fmt);
+            dump_block_to_file(ramdisk, "ramdisk.cpio")?;
         }
 
         Ok(())

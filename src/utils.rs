@@ -30,3 +30,16 @@ pub fn align_to(num: usize, alignment: usize) -> usize {
     assert_eq!(alignment & (alignment - 1), 0, "invalid alignment 0x{:x}", alignment);
     (num + alignment - 1) & !(alignment - 1)
 }
+
+
+pub trait SliceExt {
+    fn u32_at(&self, offset: usize) -> Option<u32>;
+}
+
+impl SliceExt for [u8] {
+    fn u32_at(&self, offset: usize) -> Option<u32> {
+        self.get(offset..offset + 4).map(|data| {
+            u32::from_le_bytes(data.try_into().unwrap())        
+        })
+    }
+}
