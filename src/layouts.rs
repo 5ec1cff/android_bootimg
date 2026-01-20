@@ -1,6 +1,7 @@
 use paste::paste;
 
 use crate::constants::{BOOT_ARGS_SIZE, BOOT_EXTRA_ARGS_SIZE, BOOT_ID_SIZE, BOOT_NAME_SIZE, VENDOR_BOOT_ARGS_SIZE, VENDOR_RAMDISK_NAME_SIZE, VENDOR_RAMDISK_TABLE_ENTRY_BOARD_ID_SIZE};
+use crate::utils::SliceExt;
 
 macro_rules! def_boot_header_layout {
     ({$($name:ident $t:ident),+ $(,)?}, {$($name2:ident),+ $(,)?}) => {
@@ -342,6 +343,18 @@ macro_rules! impl_ifield_accessor {
     };
 }
 
+macro_rules! impl_ifield_accessor_be {
+    ($vis:vis, $mod_name:ident, $t:ty, $name:ident $(,$suffix:ident)?) => {
+        paste! {
+            #[allow(unused)]
+            $vis fn [<get_ $name $($suffix)?>](&self) -> $t {
+                let offset = [<mod_offsets_ $mod_name>]::[<offset_ $name>] as usize;
+                return $t::from_be_bytes(self.data[offset..offset + size_of::<$t>()].try_into().unwrap());
+            }
+        }
+    };
+}
+
 macro_rules! impl_sfield_accessor {
     ($vis:vis, $mod_name:ident, $name:ident $(,$suffix:ident)?) => {
         paste! {
@@ -367,11 +380,12 @@ define_layout_common! {
     },
 }
 
+#[derive(Copy, Clone)]
 pub struct VendorRamdiskTableEntryV4<'a> {
     pub data: &'a [u8],
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum VendorRamdiskTableEntryType {
     None,
     Platform,
@@ -397,4 +411,85 @@ impl VendorRamdiskTableEntryV4<'_> {
             _ => VendorRamdiskTableEntryType::Unknown(raw),
         }
     }
+
+    pub fn patch(&self, ramdisk_size: u32, ramdisk_offset: u32) -> Vec<u8> {
+        let mut v = self.data.to_owned();
+
+        v[mod_offsets_VendorRamdiskTableEntryV4::offset_ramdisk_size..mod_offsets_VendorRamdiskTableEntryV4::offset_ramdisk_size + 4]
+            .copy_from_slice(&ramdisk_size.to_le_bytes());
+        v[mod_offsets_VendorRamdiskTableEntryV4::offset_ramdisk_offset..mod_offsets_VendorRamdiskTableEntryV4::offset_ramdisk_offset + 4]
+            .copy_from_slice(&ramdisk_offset.to_le_bytes());
+
+        v
+    }
 }
+
+const AVB_FOOTER_MAGIC_LEN: usize = 4;
+const AVB_MAGIC_LEN: usize = 4;
+const AVB_RELEASE_STRING_SIZE: usize = 48;
+
+define_layout_common! {
+    AvbFooterLayout,
+    initial_offset AVB_FOOTER_MAGIC_LEN,
+    structure {
+        version_major u32,
+        version_minor u32,
+        original_image_size u64,
+        vbmeta_offset u64,
+        vbmeta_size u64,
+        reserved 28,
+    },
+}
+
+pub struct AvbFooter<'a> {
+    pub data: &'a [u8],
+}
+
+impl AvbFooter<'_> {
+    impl_ifield_accessor_be! { pub, AvbFooterLayout, u64, original_image_size }
+    impl_ifield_accessor_be! { pub, AvbFooterLayout, u64, vbmeta_offset }
+    impl_ifield_accessor_be! { pub, AvbFooterLayout, u64, vbmeta_size }
+
+    pub const SIZE: usize = mod_offsets_AvbFooterLayout::total_size;
+
+    pub fn patch(&self, original_image_size: u64, vbmeta_offset: u64) -> Vec<u8> {
+        let mut v = self.data.to_owned();
+
+        v[mod_offsets_AvbFooterLayout::offset_original_image_size..mod_offsets_AvbFooterLayout::offset_original_image_size + 8]
+            .copy_from_slice(&original_image_size.to_be_bytes());
+        v[mod_offsets_AvbFooterLayout::offset_vbmeta_offset..mod_offsets_AvbFooterLayout::offset_vbmeta_offset + 8]
+            .copy_from_slice(&vbmeta_offset.to_be_bytes());
+
+        v
+
+    }
+}
+
+define_layout_common! {
+    AvbVBMetaImageHeaderLayout,
+    initial_offset AVB_MAGIC_LEN,
+    structure {
+        required_libavb_version_major u32,
+        required_libavb_version_minor u32,
+        authentication_data_block_size u64,
+        auxiliary_data_block_size u64,
+        algorithm_type u32,
+        hash_offset u64,
+        hash_size u64,
+        signature_offset u64,
+        signature_size u64,
+        public_key_offset u64,
+        public_key_size u64,
+        public_key_metadata_offset u64,
+        public_key_metadata_size u64,
+        descriptors_offset u64,
+        descriptors_size u64,
+        rollback_index u64,
+        flags u32,
+        rollback_index_location u32,
+        release_string AVB_RELEASE_STRING_SIZE,
+        reserved 80,
+    },
+}
+
+pub const AVB_HEADER_SIZE: usize = mod_offsets_AvbVBMetaImageHeaderLayout::total_size;

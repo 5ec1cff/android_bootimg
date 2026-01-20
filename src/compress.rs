@@ -1,10 +1,18 @@
-use crate::utils::ReadExt;
+use crate::utils::{Chunker, ReadExt, WriteExt};
 use bzip2::read::BzDecoder;
+use bzip2::write::BzEncoder;
+use bzip2::Compression as BzCompression;
 use flate2::read::MultiGzDecoder;
-use lz4::Decoder as LZ4FrameDecoder;
-use lzma_rust2::{LzmaReader, XzReader};
+use flate2::write::GzEncoder;
+use flate2::Compression as GzCompression;
+use lz4::block::CompressionMode;
+use lz4::liblz4::BlockChecksum;
+use lz4::{BlockMode, BlockSize, ContentChecksum, Decoder as LZ4FrameDecoder, Encoder as LZ4FrameEncoder, EncoderBuilder as LZ4FrameEncoderBuilder};
+use lzma_rust2::{CheckType, LzmaOptions, LzmaReader, LzmaWriter, XzOptions, XzReader, XzWriter};
 use std::cmp::min;
-use std::io::Read;
+use std::io::{BufWriter, Read, Write};
+use std::num::NonZeroU64;
+use zopfli::{BlockType, GzipEncoder as ZopFliEncoder, Options as ZopfliOptions};
 
 const GZIP1_MAGIC: &[u8] = b"\x1f\x8b";
 const GZIP2_MAGIC: &[u8] = b"\x1f\x9e";
@@ -17,7 +25,7 @@ const LZ42_MAGIC: &[u8] = b"\x04\x22\x4d\x18";
 
 // https://github.com/topjohnwu/Magisk/blob/01cb75eaefbd14c2d10772ded3942660ebf0285f/native/src/boot/lib.rs#L25-L48
 // https://github.com/topjohnwu/Magisk/blob/01cb75eaefbd14c2d10772ded3942660ebf0285f/native/src/boot/format.rs#L62
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum CompressFormat {
     UNKNOWN,
     GZIP,
@@ -73,6 +81,38 @@ pub fn parse_compress_format(data: &[u8]) -> CompressFormat {
 }
 
 
+pub trait WriteFinish<W: Write>: Write {
+    fn finish(self: Box<Self>) -> std::io::Result<W>;
+}
+
+// Boilerplate for existing types
+
+macro_rules! finish_impl {
+    ($($t:ty),*) => {$(
+        impl<W: Write> WriteFinish<W> for $t {
+            fn finish(self: Box<Self>) -> std::io::Result<W> {
+                Self::finish(*self)
+            }
+        }
+    )*}
+}
+
+finish_impl!(GzEncoder<W>, BzEncoder<W>, XzWriter<W>, LzmaWriter<W>);
+
+impl<W: Write> WriteFinish<W> for BufWriter<ZopFliEncoder<W>> {
+    fn finish(self: Box<Self>) -> std::io::Result<W> {
+        let inner = self.into_inner()?;
+        ZopFliEncoder::finish(inner)
+    }
+}
+
+impl<W: Write> WriteFinish<W> for LZ4FrameEncoder<W> {
+    fn finish(self: Box<Self>) -> std::io::Result<W> {
+        let (w, r) = Self::finish(*self);
+        r?;
+        Ok(w)
+    }
+}
 
 
 // LZ4BlockArchive format
@@ -85,6 +125,83 @@ pub fn parse_compress_format(data: &[u8]) -> CompressFormat {
 const LZ4_BLOCK_SIZE: usize = 0x800000;
 const LZ4HC_CLEVEL_MAX: i32 = 12;
 const LZ4_MAGIC: u32 = 0x184c2102;
+
+struct LZ4BlockEncoder<W: Write> {
+    write: W,
+    chunker: Chunker,
+    out_buf: Box<[u8]>,
+    total: u32,
+    is_lg: bool,
+}
+
+impl<W: Write> LZ4BlockEncoder<W> {
+    fn new(write: W, is_lg: bool) -> Self {
+        let out_sz = lz4::block::compress_bound(LZ4_BLOCK_SIZE).unwrap_or(LZ4_BLOCK_SIZE);
+        LZ4BlockEncoder {
+            write,
+            chunker: Chunker::new(LZ4_BLOCK_SIZE),
+            // SAFETY: all bytes will be initialized before it is used
+            out_buf: unsafe { Box::new_uninit_slice(out_sz).assume_init() },
+            total: 0,
+            is_lg,
+        }
+    }
+
+    fn encode_block(write: &mut W, out_buf: &mut [u8], chunk: &[u8]) -> std::io::Result<()> {
+        let compressed_size = lz4::block::compress_to_buffer(
+            chunk,
+            Some(CompressionMode::HIGHCOMPRESSION(LZ4HC_CLEVEL_MAX)),
+            false,
+            out_buf,
+        )?;
+        let block_size = compressed_size as u32;
+        write.write_pod(&block_size)?;
+        write.write_all(&out_buf[..compressed_size])
+    }
+}
+
+// https://github.com/topjohnwu/Magisk/blob/0bbc7360519726f7e3b5004542c0131fa0c0c86f/native/src/base/misc.rs#L204-L260
+
+impl<W: Write> Write for LZ4BlockEncoder<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.write_all(buf)?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn write_all(&mut self, mut buf: &[u8]) -> std::io::Result<()> {
+        if self.total == 0 {
+            // Write header
+            self.write.write_pod(&LZ4_MAGIC)?;
+        }
+
+        self.total += buf.len() as u32;
+        while !buf.is_empty() {
+            let (b, chunk) = self.chunker.add_data(buf);
+            buf = b;
+            if let Some(chunk) = chunk {
+                Self::encode_block(&mut self.write, &mut self.out_buf, chunk)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<W: Write> WriteFinish<W> for LZ4BlockEncoder<W> {
+    fn finish(mut self: Box<Self>) -> std::io::Result<W> {
+        let chunk = self.chunker.get_available();
+        if !chunk.is_empty() {
+            Self::encode_block(&mut self.write, &mut self.out_buf, chunk)?;
+        }
+        if self.is_lg {
+            self.write.write_pod(&self.total)?;
+        }
+        Ok(self.write)
+    }
+}
 
 // LZ4BlockDecoder
 
@@ -168,6 +285,49 @@ pub fn get_decoder<'a, R: Read + 'a>(
         CompressFormat::LZ4 => Box::new(LZ4FrameDecoder::new(r)?),
         CompressFormat::LZ4_LEGACY => Box::new(LZ4BlockDecoder::new(r)),
         CompressFormat::ZOPFLI | CompressFormat::GZIP => Box::new(MultiGzDecoder::new(r)),
+        _ => unreachable!(),
+    })
+}
+
+pub fn get_encoder<'a, W: Write + ?Sized>(
+    format: CompressFormat,
+    w: &'a mut W,
+) -> std::io::Result<Box<dyn WriteFinish<&'a mut W> + 'a>> {
+    Ok(match format {
+        CompressFormat::XZ => {
+            let mut opt = XzOptions::with_preset(9);
+            opt.set_check_sum_type(CheckType::Crc32);
+            Box::new(XzWriter::new(w, opt)?)
+        }
+        CompressFormat::LZMA => Box::new(LzmaWriter::new_use_header(
+            w,
+            &LzmaOptions::with_preset(9),
+            None,
+        )?),
+        CompressFormat::BZIP2 => Box::new(BzEncoder::new(w, BzCompression::best())),
+        CompressFormat::LZ4 => {
+            let encoder = LZ4FrameEncoderBuilder::new()
+                .block_size(BlockSize::Max4MB)
+                .block_mode(BlockMode::Independent)
+                .checksum(ContentChecksum::ChecksumEnabled)
+                .block_checksum(BlockChecksum::BlockChecksumEnabled)
+                .level(9)
+                .auto_flush(true)
+                .build(w)?;
+            Box::new(encoder)
+        }
+        CompressFormat::LZ4_LEGACY => Box::new(LZ4BlockEncoder::new(w, false)),
+        // CompressFormat::LZ4_LG => Box::new(LZ4BlockEncoder::new(w, true)),
+        CompressFormat::ZOPFLI => {
+            // These options are already better than gzip -9
+            let opt = ZopfliOptions {
+                iteration_count: unsafe { NonZeroU64::new_unchecked(1) },
+                maximum_block_splits: 1,
+                ..Default::default()
+            };
+            Box::new(ZopFliEncoder::new_buffered(opt, BlockType::Dynamic, w)?)
+        }
+        CompressFormat::GZIP => Box::new(GzEncoder::new(w, GzCompression::best())),
         _ => unreachable!(),
     })
 }
