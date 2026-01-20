@@ -1,13 +1,16 @@
 use crate::utils::{Chunker, ReadExt, WriteExt};
+use bzip2::Compression as BzCompression;
 use bzip2::read::BzDecoder;
 use bzip2::write::BzEncoder;
-use bzip2::Compression as BzCompression;
+use flate2::Compression as GzCompression;
 use flate2::read::MultiGzDecoder;
 use flate2::write::GzEncoder;
-use flate2::Compression as GzCompression;
 use lz4::block::CompressionMode;
 use lz4::liblz4::BlockChecksum;
-use lz4::{BlockMode, BlockSize, ContentChecksum, Decoder as LZ4FrameDecoder, Encoder as LZ4FrameEncoder, EncoderBuilder as LZ4FrameEncoderBuilder};
+use lz4::{
+    BlockMode, BlockSize, ContentChecksum, Decoder as LZ4FrameDecoder, Encoder as LZ4FrameEncoder,
+    EncoderBuilder as LZ4FrameEncoderBuilder,
+};
 use lzma_rust2::{CheckType, LzmaOptions, LzmaReader, LzmaWriter, XzOptions, XzReader, XzWriter};
 use std::cmp::min;
 use std::io::{BufWriter, Read, Write};
@@ -80,7 +83,6 @@ pub fn parse_compress_format(data: &[u8]) -> CompressFormat {
     }
 }
 
-
 pub trait WriteFinish<W: Write>: Write {
     fn finish(self: Box<Self>) -> std::io::Result<W>;
 }
@@ -113,7 +115,6 @@ impl<W: Write> WriteFinish<W> for LZ4FrameEncoder<W> {
         Ok(w)
     }
 }
-
 
 // LZ4BlockArchive format
 //

@@ -1,4 +1,4 @@
-use bytemuck::{bytes_of, bytes_of_mut, Pod};
+use bytemuck::{Pod, bytes_of, bytes_of_mut};
 use std::cmp::min;
 use std::fmt::{Debug, Display, LowerHex};
 use std::io;
@@ -49,7 +49,6 @@ impl<T: Write> WriteExt for T {
         self.write_all(bytes_of(data))
     }
 }
-
 
 pub struct Chunker {
     chunk: Box<[u8]>,
@@ -111,7 +110,12 @@ impl Chunker {
 
 pub fn align_to<N: num_traits::PrimInt + Display + Debug + LowerHex>(num: N, alignment: N) -> N {
     let one = N::from(1).unwrap();
-    assert_eq!(alignment & (alignment - one), N::from(0).unwrap(), "invalid alignment 0x{:x}", alignment);
+    assert_eq!(
+        alignment & (alignment - one),
+        N::from(0).unwrap(),
+        "invalid alignment 0x{:x}",
+        alignment
+    );
     (num + alignment - one) & !(alignment - one)
 }
 
@@ -121,8 +125,7 @@ pub trait SliceExt {
 
 impl SliceExt for [u8] {
     fn u32_at(&self, offset: usize) -> Option<u32> {
-        self.get(offset..offset + 4).map(|data| {
-            u32::from_le_bytes(data.try_into().unwrap())
-        })
+        self.get(offset..offset + 4)
+            .map(|data| u32::from_le_bytes(data.try_into().unwrap()))
     }
 }

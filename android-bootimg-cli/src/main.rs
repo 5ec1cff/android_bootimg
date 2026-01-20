@@ -1,5 +1,5 @@
 use android_bootimg::{BootHeader, BootImage, BootImagePatchOption};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use memmap2::Mmap;
 use paste::paste;
 use std::env;
@@ -8,38 +8,38 @@ use std::str::from_utf8;
 
 fn print_info(header: &BootHeader) -> Result<()> {
     macro_rules! print_info_item {
-            ($name:ident) => {
-                paste! {
-                    if header.[<has_ $name>]() {
-                        let d = header.[<get_ $name>]();
-                        println!("{}: {}", stringify!($name), d);
-                    }
+        ($name:ident) => {
+            paste! {
+                if header.[<has_ $name>]() {
+                    let d = header.[<get_ $name>]();
+                    println!("{}: {}", stringify!($name), d);
                 }
             }
-        }
+        };
+    }
 
-    print_info_item!{ kernel_size }
-    print_info_item!{ ramdisk_size }
-    print_info_item!{ second_size }
-    print_info_item!{ page_size }
-    print_info_item!{ header_version }
+    print_info_item! { kernel_size }
+    print_info_item! { ramdisk_size }
+    print_info_item! { second_size }
+    print_info_item! { page_size }
+    print_info_item! { header_version }
     if header.has_os_version_raw() {
         if let Some((os_version, patch_level)) = header.get_os_version() {
             println!("os_version: {}", os_version);
             println!("patch_level: {}", patch_level);
         }
     }
-    print_info_item!{ recovery_dtbo_size }
-    print_info_item!{ recovery_dtbo_offset }
-    print_info_item!{ header_size }
-    print_info_item!{ dtb_size }
+    print_info_item! { recovery_dtbo_size }
+    print_info_item! { recovery_dtbo_offset }
+    print_info_item! { header_size }
+    print_info_item! { dtb_size }
 
-    print_info_item!{ signature_size }
+    print_info_item! { signature_size }
 
-    print_info_item!{ vendor_ramdisk_table_size }
-    print_info_item!{ vendor_ramdisk_table_entry_num }
-    print_info_item!{ vendor_ramdisk_table_entry_size }
-    print_info_item!{ bootconfig_size }
+    print_info_item! { vendor_ramdisk_table_size }
+    print_info_item! { vendor_ramdisk_table_entry_num }
+    print_info_item! { vendor_ramdisk_table_entry_size }
+    print_info_item! { bootconfig_size }
 
     Ok(())
 }
@@ -64,7 +64,7 @@ fn main() -> Result<()> {
                     .truncate(true)
                     .open($filename)?;
                 $block.dump(&mut output, false)?
-            }
+            };
         }
 
         let blocks = boot.get_blocks();
@@ -95,7 +95,6 @@ fn main() -> Result<()> {
 
         if let Some(s2) = env::args().skip(2).next() {
             if s2 == "--patch" {
-
                 let mut patcher = BootImagePatchOption::new(&boot);
                 if blocks.get_kernel().is_some() {
                     println!("adding kernel");
@@ -112,7 +111,6 @@ fn main() -> Result<()> {
                     .truncate(true)
                     .open("new-boot.img")?;
                 patcher.patch(&mut output)?;
-
             }
         }
 

@@ -1,6 +1,9 @@
 use paste::paste;
 
-use crate::constants::{BOOT_ARGS_SIZE, BOOT_EXTRA_ARGS_SIZE, BOOT_ID_SIZE, BOOT_NAME_SIZE, VENDOR_BOOT_ARGS_SIZE, VENDOR_RAMDISK_NAME_SIZE, VENDOR_RAMDISK_TABLE_ENTRY_BOARD_ID_SIZE};
+use crate::constants::{
+    BOOT_ARGS_SIZE, BOOT_EXTRA_ARGS_SIZE, BOOT_ID_SIZE, BOOT_NAME_SIZE, VENDOR_BOOT_ARGS_SIZE,
+    VENDOR_RAMDISK_NAME_SIZE, VENDOR_RAMDISK_TABLE_ENTRY_BOARD_ID_SIZE,
+};
 use crate::utils::SliceExt;
 
 macro_rules! def_boot_header_layout {
@@ -70,9 +73,15 @@ def_boot_header_layout! {
 }
 
 macro_rules! struct_item_size {
-    (u32) => { 4 };
-    (u64) => { 8 };
-    ($sz:expr) => { $sz };
+    (u32) => {
+        4
+    };
+    (u64) => {
+        8
+    };
+    ($sz:expr) => {
+        $sz
+    };
 }
 
 macro_rules! struct_item_maybe_def_size {
@@ -288,7 +297,6 @@ define_boot_header_layout_inherits! {
     sfields {}
 }
 
-
 define_boot_header_layout! {
     VENDOR_BOOT_HEADER_V3,
     structure {
@@ -415,9 +423,11 @@ impl VendorRamdiskTableEntryV4<'_> {
     pub fn patch(&self, ramdisk_size: u32, ramdisk_offset: u32) -> Vec<u8> {
         let mut v = self.data.to_owned();
 
-        v[mod_offsets_VendorRamdiskTableEntryV4::offset_ramdisk_size..mod_offsets_VendorRamdiskTableEntryV4::offset_ramdisk_size + 4]
+        v[mod_offsets_VendorRamdiskTableEntryV4::offset_ramdisk_size
+            ..mod_offsets_VendorRamdiskTableEntryV4::offset_ramdisk_size + 4]
             .copy_from_slice(&ramdisk_size.to_le_bytes());
-        v[mod_offsets_VendorRamdiskTableEntryV4::offset_ramdisk_offset..mod_offsets_VendorRamdiskTableEntryV4::offset_ramdisk_offset + 4]
+        v[mod_offsets_VendorRamdiskTableEntryV4::offset_ramdisk_offset
+            ..mod_offsets_VendorRamdiskTableEntryV4::offset_ramdisk_offset + 4]
             .copy_from_slice(&ramdisk_offset.to_le_bytes());
 
         v
@@ -455,13 +465,14 @@ impl AvbFooter<'_> {
     pub fn patch(&self, original_image_size: u64, vbmeta_offset: u64) -> Vec<u8> {
         let mut v = self.data.to_owned();
 
-        v[mod_offsets_AvbFooterLayout::offset_original_image_size..mod_offsets_AvbFooterLayout::offset_original_image_size + 8]
+        v[mod_offsets_AvbFooterLayout::offset_original_image_size
+            ..mod_offsets_AvbFooterLayout::offset_original_image_size + 8]
             .copy_from_slice(&original_image_size.to_be_bytes());
-        v[mod_offsets_AvbFooterLayout::offset_vbmeta_offset..mod_offsets_AvbFooterLayout::offset_vbmeta_offset + 8]
+        v[mod_offsets_AvbFooterLayout::offset_vbmeta_offset
+            ..mod_offsets_AvbFooterLayout::offset_vbmeta_offset + 8]
             .copy_from_slice(&vbmeta_offset.to_be_bytes());
 
         v
-
     }
 }
 

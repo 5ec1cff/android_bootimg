@@ -1,14 +1,18 @@
 mod compress;
-mod layouts;
 mod constants;
+mod layouts;
 mod utils;
 
-use crate::compress::{get_decoder, get_encoder, parse_compress_format, CompressFormat};
-use crate::constants::{AVB_FOOTER_MAGIC, AVB_MAGIC};
-use crate::layouts::{AvbFooter, BootHeaderLayout, VendorRamdiskTableEntryType, VendorRamdiskTableEntryV4, BOOT_HEADER_V0, BOOT_HEADER_V1, BOOT_HEADER_V2, BOOT_HEADER_V3, BOOT_HEADER_V4, VENDOR_BOOT_HEADER_V3, VENDOR_BOOT_HEADER_V4};
-use crate::utils::{align_to, SliceExt};
 use crate::BootImageVersion::{Android, Vendor};
-use anyhow::{bail, Result};
+use crate::compress::{CompressFormat, get_decoder, get_encoder, parse_compress_format};
+use crate::constants::{AVB_FOOTER_MAGIC, AVB_MAGIC};
+use crate::layouts::{
+    AvbFooter, BOOT_HEADER_V0, BOOT_HEADER_V1, BOOT_HEADER_V2, BOOT_HEADER_V3, BOOT_HEADER_V4,
+    BootHeaderLayout, VENDOR_BOOT_HEADER_V3, VENDOR_BOOT_HEADER_V4, VendorRamdiskTableEntryType,
+    VendorRamdiskTableEntryV4,
+};
+use crate::utils::{SliceExt, align_to};
+use anyhow::{Result, bail};
 use paste::paste;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
@@ -22,7 +26,7 @@ const VENDOR_BOOT_MAGIC: &[u8] = b"VNDRBOOT";
 pub struct OsVersion {
     a: u32,
     b: u32,
-    c: u32
+    c: u32,
 }
 
 impl Display for OsVersion {
@@ -140,7 +144,7 @@ impl<'a> BootHeader<'a> {
                 if v >= 3 {
                     return 4096;
                 }
-            },
+            }
             _ => {}
         }
 
@@ -155,14 +159,14 @@ impl<'a> BootHeader<'a> {
 
     pub fn parse(data: &'a [u8]) -> Result<Self> {
         if data.starts_with(BOOT_MAGIC) {
-            if let Some(version) =  data.u32_at(BOOT_HEADER_V0.offset_header_version as usize) {
+            if let Some(version) = data.u32_at(BOOT_HEADER_V0.offset_header_version as usize) {
                 let layout = match version {
                     0 => &BOOT_HEADER_V0,
                     1 => &BOOT_HEADER_V1,
                     2 => &BOOT_HEADER_V2,
                     3 => &BOOT_HEADER_V3,
                     4 => &BOOT_HEADER_V4,
-                    _ => bail!("unsupported boot version {}", version)
+                    _ => bail!("unsupported boot version {}", version),
                 };
 
                 let data = &data[..layout.total_size as usize];
@@ -174,11 +178,12 @@ impl<'a> BootHeader<'a> {
                 });
             }
         } else if data.starts_with(VENDOR_BOOT_MAGIC) {
-            if let Some(version) =  data.u32_at(VENDOR_BOOT_HEADER_V3.offset_header_version as usize) {
+            if let Some(version) = data.u32_at(VENDOR_BOOT_HEADER_V3.offset_header_version as usize)
+            {
                 let layout = match version {
                     3 => &VENDOR_BOOT_HEADER_V3,
                     4 => &VENDOR_BOOT_HEADER_V4,
-                    _ => bail!("unsupported vendor boot version {}", version)
+                    _ => bail!("unsupported vendor boot version {}", version),
                 };
 
                 let data = &data[..layout.total_size as usize];
@@ -240,11 +245,16 @@ impl RamdiskImage<'_> {
     }
 
     pub fn get_vendor_ramdisk_num(&self) -> usize {
-        self.vendor_ramdisk_table.as_ref().map(|t| t.len()).unwrap_or(0)
+        self.vendor_ramdisk_table
+            .as_ref()
+            .map(|t| t.len())
+            .unwrap_or(0)
     }
 
     pub fn get_vendor_ramdisk(&self, index: usize) -> Option<&VendorRamdiskEntry> {
-        self.vendor_ramdisk_table.as_ref().and_then(|t| t.get(index))
+        self.vendor_ramdisk_table
+            .as_ref()
+            .and_then(|t| t.get(index))
     }
 }
 
@@ -267,7 +277,6 @@ impl<'a> BootImageBlocks<'a> {
     pub fn get_ramdisk(&self) -> Option<&RamdiskImage<'a>> {
         self.ramdisk.as_ref()
     }
-
 
     pub fn parse(data: &'a [u8], boot_header: &BootHeader) -> Result<(Self, usize)> {
         let mut off = boot_header.hdr_space();
@@ -315,7 +324,7 @@ impl<'a> BootImageBlocks<'a> {
         let kernel = if let Some(data) = kernel {
             Some(KernelImage {
                 data,
-                compress_format: parse_compress_format(data)
+                compress_format: parse_compress_format(data),
             })
         } else {
             None
@@ -327,10 +336,14 @@ impl<'a> BootImageBlocks<'a> {
                 bail!("invalid vendor ramdisk table entry size: {}", entry_size);
             }
 
-            let entry_table_size = boot_header.get_vendor_ramdisk_table_entry_num() as usize * entry_size;
+            let entry_table_size =
+                boot_header.get_vendor_ramdisk_table_entry_num() as usize * entry_size;
 
             if entry_table.len() < entry_table_size {
-                bail!("invalid vendor ramdisk table entry size: {}", entry_table.len());
+                bail!(
+                    "invalid vendor ramdisk table entry size: {}",
+                    entry_table.len()
+                );
             }
 
             let entry_table = &entry_table[..entry_table_size];
@@ -374,18 +387,23 @@ impl<'a> BootImageBlocks<'a> {
                 } else {
                     CompressFormat::UNKNOWN
                 },
-                vendor_ramdisk_table
+                vendor_ramdisk_table,
             })
         } else {
             None
         };
 
-
         Ok((
             BootImageBlocks {
-                kernel, ramdisk, second, recovery_dtbo, dtb, signature, bootconfig
+                kernel,
+                ramdisk,
+                second,
+                recovery_dtbo,
+                dtb,
+                signature,
+                bootconfig,
             },
-            off
+            off,
         ))
     }
 }
@@ -459,7 +477,8 @@ impl<'a> BootImage<'a> {
             if avb_footer.starts_with(AVB_FOOTER_MAGIC) {
                 let avb_footer = AvbFooter { data: avb_footer };
                 let off = avb_footer.get_vbmeta_offset() as usize;
-                if let Some(avb_header) = data.get(off..off + avb_footer.get_vbmeta_size() as usize) {
+                if let Some(avb_header) = data.get(off..off + avb_footer.get_vbmeta_size() as usize)
+                {
                     if avb_header.starts_with(AVB_MAGIC) {
                         let avb_payload_size = avb_footer.get_original_image_size() as usize;
                         let avb_tail = if avb_payload_size > tail {
@@ -487,7 +506,12 @@ impl<'a> BootImage<'a> {
             None
         };
 
-        Ok(Self { data, header, blocks, avb_info })
+        Ok(Self {
+            data,
+            header,
+            blocks,
+            avb_info,
+        })
     }
 
     pub fn get_header(&self) -> &BootHeader {
@@ -514,7 +538,7 @@ pub struct BootImagePatchOption<'a> {
     override_os_version: Option<(OsVersion, PatchLevel)>,
 }
 
-pub trait BootImageOutput : Read + Write + Seek {
+pub trait BootImageOutput: Read + Write + Seek {
     fn truncate(&mut self, size: u64) -> std::io::Result<()>;
 }
 
@@ -531,17 +555,34 @@ impl<'a> BootImagePatchOption<'a> {
     }
 
     pub fn replace_ramdisk(&mut self, ramdisk: Box<dyn Read>, compressed: bool) -> &mut Self {
-        self.replace_ramdisk = Some(ReplacePayload { data: ramdisk, compressed });
+        self.replace_ramdisk = Some(ReplacePayload {
+            data: ramdisk,
+            compressed,
+        });
         self
     }
 
     pub fn replace_kernel(&mut self, kernel: Box<dyn Read>, compressed: bool) -> &mut Self {
-        self.replace_kernel = Some(ReplacePayload { data: kernel, compressed });
+        self.replace_kernel = Some(ReplacePayload {
+            data: kernel,
+            compressed,
+        });
         self
     }
 
-    pub fn replace_vendor_ramdisk(&mut self, index: usize, ramdisk: Box<dyn Read>, compressed: bool) -> &mut Self {
-        self.replace_vendor_ramdisk.insert(index, ReplacePayload { data: ramdisk, compressed });
+    pub fn replace_vendor_ramdisk(
+        &mut self,
+        index: usize,
+        ramdisk: Box<dyn Read>,
+        compressed: bool,
+    ) -> &mut Self {
+        self.replace_vendor_ramdisk.insert(
+            index,
+            ReplacePayload {
+                data: ramdisk,
+                compressed,
+            },
+        );
         self
     }
 
@@ -550,7 +591,10 @@ impl<'a> BootImagePatchOption<'a> {
         self
     }
 
-    pub fn override_os_version(&mut self, override_os_version: (OsVersion, PatchLevel)) -> &mut Self {
+    pub fn override_os_version(
+        &mut self,
+        override_os_version: (OsVersion, PatchLevel),
+    ) -> &mut Self {
         self.override_os_version = Some(override_os_version);
         self
     }
@@ -575,18 +619,20 @@ impl<'a> BootImagePatchOption<'a> {
         }
 
         let header_off = output.seek(SeekFrom::Current(0))?;
-        output.write_all(&self.source_boot_image.data[..self.source_boot_image.header.hdr_space()])?;
+        output
+            .write_all(&self.source_boot_image.data[..self.source_boot_image.header.hdr_space()])?;
         pos += self.source_boot_image.header.hdr_space() as u64;
         println!("header space {}", pos);
 
         let kernel_off = pos;
-        let kernel_source: Option<(Box<dyn Read>, bool)> = if let Some(payload) = self.replace_kernel {
-            Some((payload.data, payload.compressed))
-        } else if let Some(kernel) = &self.source_boot_image.blocks.kernel {
-            Some((Box::new(kernel.data), true))
-        } else {
-            None
-        };
+        let kernel_source: Option<(Box<dyn Read>, bool)> =
+            if let Some(payload) = self.replace_kernel {
+                Some((payload.data, payload.compressed))
+            } else if let Some(kernel) = &self.source_boot_image.blocks.kernel {
+                Some((Box::new(kernel.data), true))
+            } else {
+                None
+            };
 
         let kernel_size = if let Some((mut kernel_source, compressed)) = kernel_source {
             let format = if compressed {
@@ -619,24 +665,35 @@ impl<'a> BootImagePatchOption<'a> {
 
         let ramdisk_off = pos;
 
-        let (ramdisk_size, vendor_ramdisk_table) = if let Some(vendor_ramdisk_table) = self.source_boot_image.blocks.ramdisk.as_ref().and_then(|it| it.vendor_ramdisk_table.as_ref()) {
+        let (ramdisk_size, vendor_ramdisk_table) = if let Some(vendor_ramdisk_table) = self
+            .source_boot_image
+            .blocks
+            .ramdisk
+            .as_ref()
+            .and_then(|it| it.vendor_ramdisk_table.as_ref())
+        {
             if self.replace_ramdisk.is_some() {
-                bail!("Could not replace ramdisk for vendor boot v4, please use replace_vendor_ramdisk!");
+                bail!(
+                    "Could not replace ramdisk for vendor boot v4, please use replace_vendor_ramdisk!"
+                );
             }
             let mut vendor_ramdisk_table: Vec<VendorRamdiskEntry> = vendor_ramdisk_table.clone();
 
-            if let Some((index, _)) = self.replace_vendor_ramdisk.iter().find(|(index, _)| {
-                **index >= vendor_ramdisk_table.len()
-            }) {
+            if let Some((index, _)) = self
+                .replace_vendor_ramdisk
+                .iter()
+                .find(|(index, _)| **index >= vendor_ramdisk_table.len())
+            {
                 bail!("invalid index {}", index);
             }
 
             for (index, entry) in vendor_ramdisk_table.iter_mut().enumerate() {
-                let (mut ramdisk_source, compressed): (Box<dyn Read>, bool) = if let Some(payload) = self.replace_vendor_ramdisk.remove(&index) {
-                    (payload.data, payload.compressed)
-                } else {
-                    (Box::new(entry.data), true)
-                };
+                let (mut ramdisk_source, compressed): (Box<dyn Read>, bool) =
+                    if let Some(payload) = self.replace_vendor_ramdisk.remove(&index) {
+                        (payload.data, payload.compressed)
+                    } else {
+                        (Box::new(entry.data), true)
+                    };
                 let format = if compressed {
                     CompressFormat::UNKNOWN
                 } else {
@@ -663,15 +720,16 @@ impl<'a> BootImagePatchOption<'a> {
             if !self.replace_vendor_ramdisk.is_empty() {
                 bail!("Could not replace vendor ramdisk, please use replace_ramdisk!");
             }
-            let ramdisk_source: Option<(Box<dyn Read>, bool)> = if let Some(payload) = self.replace_ramdisk {
-                println!("using replace_ramdisk compressed={}", payload.compressed);
-                Some((payload.data, payload.compressed))
-            } else if let Some(ramdisk) = &self.source_boot_image.blocks.ramdisk {
-                println!("using source ramdisk");
-                Some((Box::new(ramdisk.data), true))
-            } else {
-                None
-            };
+            let ramdisk_source: Option<(Box<dyn Read>, bool)> =
+                if let Some(payload) = self.replace_ramdisk {
+                    println!("using replace_ramdisk compressed={}", payload.compressed);
+                    Some((payload.data, payload.compressed))
+                } else if let Some(ramdisk) = &self.source_boot_image.blocks.ramdisk {
+                    println!("using source ramdisk");
+                    Some((Box::new(ramdisk.data), true))
+                } else {
+                    None
+                };
 
             let ramdisk_size = if let Some((mut ramdisk_source, compressed)) = ramdisk_source {
                 let format = if compressed {
@@ -703,7 +761,10 @@ impl<'a> BootImagePatchOption<'a> {
             (ramdisk_size, None)
         };
 
-        println!("ramdisk off {} sz {} pos {}", ramdisk_off, ramdisk_size, pos);
+        println!(
+            "ramdisk off {} sz {} pos {}",
+            ramdisk_off, ramdisk_size, pos
+        );
 
         file_align!();
 
@@ -738,7 +799,11 @@ impl<'a> BootImagePatchOption<'a> {
         let vendor_ramdisk_table_off = pos;
         let vendor_ramdisk_table_size = if let Some(vendor_ramdisk_table) = vendor_ramdisk_table {
             for entry in vendor_ramdisk_table {
-                output.write_all(&entry.entry.patch(entry.entry_size as u32, entry.entry_offset as u32))?;
+                output.write_all(
+                    &entry
+                        .entry
+                        .patch(entry.entry_size as u32, entry.entry_offset as u32),
+                )?;
             }
 
             pos = output.seek(SeekFrom::Current(0))?;

@@ -1,5 +1,3 @@
-
-
 pub const BOOT_NAME_SIZE: usize = 16;
 pub const BOOT_ARGS_SIZE: usize = 512;
 pub const BOOT_ID_SIZE: usize = 32;
@@ -9,5 +7,3 @@ pub const VENDOR_RAMDISK_NAME_SIZE: usize = 32;
 pub const VENDOR_RAMDISK_TABLE_ENTRY_BOARD_ID_SIZE: usize = 16;
 pub const AVB_FOOTER_MAGIC: &'static [u8] = b"AVBf";
 pub const AVB_MAGIC: &'static [u8] = b"AVB0";
-
-
