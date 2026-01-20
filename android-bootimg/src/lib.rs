@@ -9,20 +9,17 @@ use crate::layouts::{AvbFooter, BootHeaderLayout, VendorRamdiskTableEntryType, V
 use crate::utils::{align_to, SliceExt};
 use crate::BootImageVersion::{Android, Vendor};
 use anyhow::{bail, Result};
-use memmap2::Mmap;
 use paste::paste;
 use std::collections::HashMap;
-use std::env;
 use std::fmt::{Display, Formatter};
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::ops::{Deref, DerefMut};
-use std::str::from_utf8;
 
 const BOOT_MAGIC: &[u8] = b"ANDROID!";
 const VENDOR_BOOT_MAGIC: &[u8] = b"VNDRBOOT";
 
-struct OsVersion {
+pub struct OsVersion {
     a: u32,
     b: u32,
     c: u32
@@ -34,7 +31,7 @@ impl Display for OsVersion {
     }
 }
 
-struct PatchLevel {
+pub struct PatchLevel {
     year: u32,
     month: u32,
 }
@@ -45,13 +42,13 @@ impl Display for PatchLevel {
     }
 }
 
-#[derive(Debug)]
-enum BootImageVersion {
+#[derive(Debug, Copy, Clone)]
+pub enum BootImageVersion {
     Android(u32),
     Vendor(u32),
 }
 
-struct BootHeader<'a> {
+pub struct BootHeader<'a> {
     data: &'a [u8],
     layout: &'static BootHeaderLayout,
     version: BootImageVersion,
@@ -110,6 +107,14 @@ impl<'a> BootHeader<'a> {
     impl_sfield_accessor! { pub, cmdline }
     impl_sfield_accessor! { pub, id }
     impl_sfield_accessor! { pub, extra_cmdline }
+
+    pub fn get_layout(&self) -> &'static BootHeaderLayout {
+        self.layout
+    }
+
+    pub fn get_version(&self) -> BootImageVersion {
+        self.version
+    }
 
     pub fn get_os_version(&self) -> Option<(OsVersion, PatchLevel)> {
         let version = self.get_os_version_raw();
@@ -189,18 +194,61 @@ impl<'a> BootHeader<'a> {
     }
 }
 
-struct KernelImage<'a> {
+pub struct KernelImage<'a> {
     data: &'a [u8],
     compress_format: CompressFormat,
 }
 
-struct RamdiskImage<'a> {
+impl KernelImage<'_> {
+    pub fn get_data(&self) -> &[u8] {
+        self.data
+    }
+
+    pub fn get_compress_format(&self) -> CompressFormat {
+        self.compress_format
+    }
+
+    pub fn dump(&self, out: &mut dyn Write, raw: bool) -> Result<()> {
+        dump_block(self.data, out, raw)
+    }
+}
+
+pub struct RamdiskImage<'a> {
     data: &'a [u8],
     compress_format: CompressFormat,
     vendor_ramdisk_table: Option<Vec<VendorRamdiskEntry<'a>>>,
 }
 
-struct BootImageBlocks<'a> {
+impl RamdiskImage<'_> {
+    pub fn get_data(&self) -> &[u8] {
+        self.data
+    }
+
+    pub fn get_compress_format(&self) -> CompressFormat {
+        self.compress_format
+    }
+
+    pub fn dump(&self, out: &mut dyn Write, raw: bool) -> Result<()> {
+        if self.vendor_ramdisk_table.is_some() {
+            bail!("")
+        }
+        dump_block(self.data, out, raw)
+    }
+
+    pub fn is_vendor_ramdisk(&self) -> bool {
+        self.vendor_ramdisk_table.is_some()
+    }
+
+    pub fn get_vendor_ramdisk_num(&self) -> usize {
+        self.vendor_ramdisk_table.as_ref().map(|t| t.len()).unwrap_or(0)
+    }
+
+    pub fn get_vendor_ramdisk(&self, index: usize) -> Option<&VendorRamdiskEntry> {
+        self.vendor_ramdisk_table.as_ref().and_then(|t| t.get(index))
+    }
+}
+
+pub struct BootImageBlocks<'a> {
     kernel: Option<KernelImage<'a>>,
     ramdisk: Option<RamdiskImage<'a>>,
     second: Option<&'a [u8]>,
@@ -212,6 +260,15 @@ struct BootImageBlocks<'a> {
 }
 
 impl<'a> BootImageBlocks<'a> {
+    pub fn get_kernel(&self) -> Option<&KernelImage<'a>> {
+        self.kernel.as_ref()
+    }
+
+    pub fn get_ramdisk(&self) -> Option<&RamdiskImage<'a>> {
+        self.ramdisk.as_ref()
+    }
+
+
     pub fn parse(data: &'a [u8], boot_header: &BootHeader) -> Result<(Self, usize)> {
         let mut off = boot_header.hdr_space();
         let page_size = boot_header.page_size();
@@ -340,7 +397,7 @@ struct BootImageAVBInfo<'a> {
 }
 
 #[derive(Copy, Clone)]
-struct VendorRamdiskEntry<'a> {
+pub struct VendorRamdiskEntry<'a> {
     data: &'a [u8],
     entry_offset: u64,
     entry_size: u64,
@@ -349,7 +406,29 @@ struct VendorRamdiskEntry<'a> {
     entry: VendorRamdiskTableEntryV4<'a>,
 }
 
-struct BootImage<'a> {
+impl VendorRamdiskEntry<'_> {
+    pub fn get_data(&self) -> &[u8] {
+        self.data
+    }
+
+    pub fn get_name(&self) -> &[u8] {
+        trim_end(self.entry.get_ramdisk_name())
+    }
+
+    pub fn get_entry_type(&self) -> VendorRamdiskTableEntryType {
+        self.entry_type
+    }
+
+    pub fn get_compress_format(&self) -> CompressFormat {
+        self.compress_format
+    }
+
+    pub fn dump(&self, out: &mut dyn Write, raw: bool) -> Result<()> {
+        dump_block(self.data, out, raw)
+    }
+}
+
+pub struct BootImage<'a> {
     data: &'a [u8],
     header: BootHeader<'a>,
     blocks: BootImageBlocks<'a>,
@@ -411,43 +490,12 @@ impl<'a> BootImage<'a> {
         Ok(Self { data, header, blocks, avb_info })
     }
 
+    pub fn get_header(&self) -> &BootHeader {
+        &self.header
+    }
 
-    fn print_info(&self) -> Result<()> {
-        macro_rules! print_info_item {
-            ($self: ident, $name:ident) => {
-                paste! {
-                    if $self.header.[<has_ $name>]() {
-                        let d = $self.header.[<get_ $name>]();
-                        println!("{}: {}", stringify!($name), d);
-                    }
-                }
-            }
-        }
-
-        print_info_item!{ self, kernel_size }
-        print_info_item!{ self, ramdisk_size }
-        print_info_item!{ self, second_size }
-        print_info_item!{ self, page_size }
-        print_info_item!{ self, header_version }
-        if self.header.has_os_version_raw() {
-            if let Some((os_version, patch_level)) = self.header.get_os_version() {
-                println!("os_version: {}", os_version);
-                println!("patch_level: {}", patch_level);
-            }
-        }
-        print_info_item!{ self, recovery_dtbo_size }
-        print_info_item!{ self, recovery_dtbo_offset }
-        print_info_item!{ self, header_size }
-        print_info_item!{ self, dtb_size }
-
-        print_info_item!{ self, signature_size }
-
-        print_info_item!{ self, vendor_ramdisk_table_size }
-        print_info_item!{ self, vendor_ramdisk_table_entry_num }
-        print_info_item!{ self, vendor_ramdisk_table_entry_size }
-        print_info_item!{ self, bootconfig_size }
-
-        Ok(())
+    pub fn get_blocks(&self) -> &BootImageBlocks {
+        &self.blocks
     }
 }
 
@@ -456,7 +504,7 @@ struct ReplacePayload {
     compressed: bool,
 }
 
-struct BootImagePatchOption<'a> {
+pub struct BootImagePatchOption<'a> {
     source_boot_image: &'a BootImage<'a>,
     replace_ramdisk: Option<ReplacePayload>,
     replace_kernel: Option<ReplacePayload>,
@@ -466,7 +514,7 @@ struct BootImagePatchOption<'a> {
     override_os_version: Option<(OsVersion, PatchLevel)>,
 }
 
-trait BootImageOutput : Read + Write + Seek {
+pub trait BootImageOutput : Read + Write + Seek {
     fn truncate(&mut self, size: u64) -> std::io::Result<()>;
 }
 
@@ -759,81 +807,4 @@ impl BootImageOutput for File {
 
 fn trim_end(data: &[u8]) -> &[u8] {
     &data[..data.iter().position(|&b| b == 0).unwrap_or(data.len())]
-}
-
-fn main() -> Result<()> {
-    if let Some(s) = env::args().skip(1).next() {
-        let file = File::open(s)?;
-        let mem = unsafe { Mmap::map(&file)? };
-        let boot = BootImage::parse(&mem)?;
-
-        println!("version: {:?}", boot.header.version);
-        println!("layout: {:?}", boot.header.layout);
-        boot.print_info()?;
-
-        fn dump_block_to_file(block: &[u8], name: &str) -> Result<()> {
-            let mut output = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(name)?;
-            dump_block(block, &mut output, false)
-        }
-
-        if let Some(kernel) = &boot.blocks.kernel {
-            println!("kernel format: {:?}", kernel.compress_format);
-            dump_block_to_file(kernel.data, "kernel")?;
-        }
-
-        if let Some(ramdisk) = &boot.blocks.ramdisk {
-            if let Some(table) = &ramdisk.vendor_ramdisk_table {
-                println!("vendor ramdisk table");
-                for t in table {
-                    if let Ok(name) = from_utf8(trim_end(t.entry.get_ramdisk_name())) {
-                        println!("name: {}", name);
-                        println!("type: {:?}", t.entry.get_ramdisk_type());
-                        dump_block_to_file(t.data, &format!("vendor.{}.cpio", name))?;
-                    } else {
-                        println!("invalid ramdisk name: {:?}", t.entry.get_ramdisk_name());
-                    }
-                }
-            } else {
-                println!("ramdisk format: {:?}", ramdisk.compress_format);
-                dump_block_to_file(ramdisk.data, "ramdisk.cpio")?;
-            }
-        }
-
-        if let Some(avb_info) = &boot.avb_info {
-            println!("avb");
-            if let Some(tail) = avb_info.avb_tail {
-                println!("avb tail {}", tail.len());
-            }
-        }
-
-        if let Some(s2) = env::args().skip(2).next() {
-            if s2 == "--patch" {
-
-                let mut patcher = BootImagePatchOption::new(&boot);
-                if boot.blocks.kernel.is_some() {
-                    println!("adding kernel");
-                    patcher.replace_kernel(Box::new(File::open("kernel")?), false);
-                }
-                if boot.blocks.ramdisk.is_some() {
-                    println!("adding ramdisk");
-                    patcher.replace_ramdisk(Box::new(File::open("ramdisk.cpio")?), false);
-                }
-                let mut output = OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .open("new-boot.img")?;
-                patcher.patch(&mut output)?;
-
-            }
-        }
-
-        Ok(())
-    } else {
-        bail!("no file provided")
-    }
 }
