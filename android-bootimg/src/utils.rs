@@ -8,11 +8,13 @@ use std::mem::MaybeUninit;
 // https://github.com/topjohnwu/Magisk/blob/0bbc7360519726f7e3b5004542c0131fa0c0c86f/native/src/base/files.rs#L24-L128
 
 pub trait ReadExt {
+    #[allow(unused)]
     fn skip(&mut self, len: usize) -> io::Result<()>;
     fn read_pod<F: Pod>(&mut self, data: &mut F) -> io::Result<()>;
 }
 
 impl<T: Read> ReadExt for T {
+    #[allow(unused)]
     fn skip(&mut self, mut len: usize) -> io::Result<()> {
         let mut buf = MaybeUninit::<[u8; 4096]>::uninit();
         let buf = unsafe { buf.assume_init_mut() };
@@ -30,6 +32,7 @@ impl<T: Read> ReadExt for T {
 }
 
 pub trait WriteExt {
+    #[allow(unused)]
     fn write_zeros(&mut self, len: usize) -> io::Result<()>;
     fn write_pod<F: Pod>(&mut self, data: &F) -> io::Result<()>;
 }
@@ -66,6 +69,7 @@ impl Chunker {
         }
     }
 
+    #[allow(unused)]
     pub fn set_chunk_size(&mut self, chunk_size: usize) {
         self.chunk_size = chunk_size;
         self.pos = 0;
@@ -128,4 +132,8 @@ impl SliceExt for [u8] {
         self.get(offset..offset + 4)
             .map(|data| u32::from_le_bytes(data.try_into().unwrap()))
     }
+}
+
+pub fn trim_end(data: &[u8]) -> &[u8] {
+    &data[..data.iter().position(|&b| b == 0).unwrap_or(data.len())]
 }

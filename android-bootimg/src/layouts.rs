@@ -4,7 +4,6 @@ use crate::constants::{
     BOOT_ARGS_SIZE, BOOT_EXTRA_ARGS_SIZE, BOOT_ID_SIZE, BOOT_NAME_SIZE, VENDOR_BOOT_ARGS_SIZE,
     VENDOR_RAMDISK_NAME_SIZE, VENDOR_RAMDISK_TABLE_ENTRY_BOARD_ID_SIZE,
 };
-use crate::utils::SliceExt;
 
 macro_rules! def_boot_header_layout {
     ({$($name:ident $t:ident),+ $(,)?}, {$($name2:ident),+ $(,)?}) => {

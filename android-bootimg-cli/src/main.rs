@@ -1,4 +1,4 @@
-use android_bootimg::{BootHeader, BootImage, BootImagePatchOption};
+use android_bootimg::{parser::BootHeader, parser::BootImage, patcher::BootImagePatchOption};
 use anyhow::{Result, bail};
 use memmap2::Mmap;
 use paste::paste;

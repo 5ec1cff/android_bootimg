@@ -38,6 +38,7 @@ pub enum CompressFormat {
     LZMA,
     BZIP2,
     LZ4,
+    #[allow(non_camel_case_types)]
     LZ4_LEGACY,
     // LZ4_LG,
 }
