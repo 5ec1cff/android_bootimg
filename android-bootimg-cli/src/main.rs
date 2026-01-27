@@ -83,6 +83,10 @@ fn main() -> Result<()> {
                         println!("name: {}", name);
                         println!("type: {:?}", entry.get_entry_type());
                         dump_block_to_file!(entry, &format!("vendor.{}.cpio", name));
+                        let mut data = Vec::<u8>::new();
+                        entry.dump(&mut data, false)?;
+                        let cpio = android_bootimg::cpio::Cpio::load_from_data(data.as_slice())?;
+                        cpio.ls("/", true);
                     } else {
                         println!("invalid ramdisk name: {:?}", entry.get_name());
                     }
@@ -90,6 +94,10 @@ fn main() -> Result<()> {
             } else {
                 println!("ramdisk format: {:?}", ramdisk.get_compress_format());
                 dump_block_to_file!(ramdisk, "ramdisk.cpio");
+                let mut data = Vec::<u8>::new();
+                ramdisk.dump(&mut data, false)?;
+                let cpio = android_bootimg::cpio::Cpio::load_from_data(data.as_slice())?;
+                cpio.ls("/", true);
             }
         }
 
