@@ -1,11 +1,11 @@
+use crate::utils::{WriteExt, align_to};
 use anyhow::{Result, anyhow, bail};
 use itertools::Itertools;
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 use std::io::{Cursor, Read, Write};
+use std::ops::Deref;
 use std::{io, str};
-
-use crate::utils::{WriteExt, align_to};
 
 pub struct Cpio {
     entries: BTreeMap<String, Box<CpioEntry>>,
@@ -215,6 +215,10 @@ impl Cpio {
     pub fn entries(&self) -> &BTreeMap<String, Box<CpioEntry>> {
         &self.entries
     }
+
+    pub fn entry_by_name(&self, name: &str) -> Option<&CpioEntry> {
+        self.entries.get(name).map(|x| x.deref())
+    }
 }
 
 impl Cpio {
@@ -274,6 +278,10 @@ impl CpioEntry {
             .as_ref()
             .map(|d| d.as_ref().as_ref().len())
             .unwrap_or(0)
+    }
+
+    pub fn data(&self) -> Option<&[u8]> {
+        self.data.as_ref().map(|x| x.deref().as_ref())
     }
 
     pub fn regular(mode: u32, data: Box<dyn AsRef<[u8]>>) -> Self {

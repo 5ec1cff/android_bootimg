@@ -8,7 +8,6 @@ use crate::layouts::{
 use crate::parser::BootImageVersion::{Android, Vendor};
 use crate::utils::{SliceExt, align_to, trim_end};
 use anyhow::bail;
-use itertools::Itertools;
 use paste::paste;
 use std::fmt::{Display, Formatter};
 use std::io::Write;
