@@ -108,9 +108,23 @@ fn main() -> Result<()> {
                     println!("adding kernel");
                     patcher.replace_kernel(Box::new(File::open("kernel")?), false);
                 }
-                if blocks.get_ramdisk().is_some() {
-                    println!("adding ramdisk");
-                    patcher.replace_ramdisk(Box::new(File::open("ramdisk.cpio")?), false);
+                if let Some(ramdisk) = blocks.get_ramdisk() {
+                    if ramdisk.is_vendor_ramdisk() {
+                        println!("adding vendor ramdisk");
+                        for i in 0..ramdisk.get_vendor_ramdisk_num() {
+                            let entry = ramdisk.get_vendor_ramdisk(i).unwrap();
+                            let name = from_utf8(entry.get_name())?;
+                            println!("name: {}", name);
+                            patcher.replace_vendor_ramdisk(
+                                i,
+                                Box::new(File::open(format!("vendor.{}.cpio", name))?),
+                                false,
+                            );
+                        }
+                    } else {
+                        println!("adding ramdisk");
+                        patcher.replace_ramdisk(Box::new(File::open("ramdisk.cpio")?), false);
+                    }
                 }
                 // TODO: vendor ramdisk
                 let mut output = OpenOptions::new()

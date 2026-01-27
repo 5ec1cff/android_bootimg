@@ -265,10 +265,7 @@ impl Display for CpioEntry {
 
 #[inline(always)]
 fn norm_path(path: &str) -> String {
-    path.split('/')
-        .filter(|x| !x.is_empty())
-        .intersperse("/")
-        .collect()
+    Itertools::intersperse(path.split('/').filter(|x| !x.is_empty()), "/").collect()
 }
 
 impl CpioEntry {

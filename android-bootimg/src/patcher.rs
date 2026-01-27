@@ -1,11 +1,10 @@
 use crate::compress::{CompressFormat, get_encoder};
 use crate::layouts::AvbFooter;
 use crate::parser::{BootImage, OsVersion, PatchLevel, VendorRamdiskEntry};
-use crate::utils::align_to;
+use crate::utils::{WriteExt, align_to};
 use anyhow::bail;
 use paste::paste;
 use std::collections::HashMap;
-use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::ops::DerefMut;
 
@@ -22,10 +21,6 @@ pub struct BootImagePatchOption<'a> {
     // TODO: allow replace other blocks
     override_cmdline: Option<&'a [u8]>,
     override_os_version: Option<(OsVersion, PatchLevel)>,
-}
-
-pub trait BootImageOutput: Read + Write + Seek {
-    fn truncate(&mut self, size: u64) -> std::io::Result<()>;
 }
 
 impl<'a> BootImagePatchOption<'a> {
@@ -85,16 +80,18 @@ impl<'a> BootImagePatchOption<'a> {
         self
     }
 
-    pub fn patch(mut self, output: &mut dyn BootImageOutput) -> anyhow::Result<()> {
-        // TODO: chromeos
-        output.truncate(self.source_boot_image.data.len() as u64)?;
-
+    pub fn patch<P: Write + Seek>(mut self, output: &mut P) -> anyhow::Result<()> {
         output.seek(SeekFrom::Start(0))?;
 
         let mut pos: u64 = 0;
         macro_rules! file_align_with {
             ($e:expr) => {
-                pos = output.seek(SeekFrom::Start(align_to(pos, $e)))?;
+                let new_pos = align_to(pos, $e);
+                let pad_len = new_pos - pos;
+                if pad_len > 0 {
+                    output.write_zeros(pad_len as usize)?;
+                }
+                pos = new_pos;
             };
         }
 
@@ -151,6 +148,8 @@ impl<'a> BootImagePatchOption<'a> {
 
         let ramdisk_off = pos;
 
+        println!("writing ramdisk");
+
         let (ramdisk_size, vendor_ramdisk_table) = if let Some(vendor_ramdisk_table) = self
             .source_boot_image
             .blocks
@@ -174,6 +173,7 @@ impl<'a> BootImagePatchOption<'a> {
             }
 
             for (index, entry) in vendor_ramdisk_table.iter_mut().enumerate() {
+                println!("appending vendor ramdisk {index}");
                 let (mut ramdisk_source, compressed): (Box<dyn Read>, bool) =
                     if let Some(payload) = self.replace_vendor_ramdisk.remove(&index) {
                         (payload.data, payload.compressed)
@@ -302,6 +302,9 @@ impl<'a> BootImagePatchOption<'a> {
 
         // Copy and patch AVB
 
+        let mut zero_start = pos;
+        let mut zero_end = self.source_boot_image.data.len() as u64;
+
         if let Some(avb_info) = self.source_boot_image.avb_info.as_ref() {
             if let Some(avb_tail) = avb_info.avb_tail {
                 output.write_all(avb_tail)?;
@@ -313,10 +316,16 @@ impl<'a> BootImagePatchOption<'a> {
             file_align_with!(4096);
             let avb_header_off = pos;
             output.write_all(avb_info.avb_header)?;
+            zero_start = output.seek(SeekFrom::Current(0))?;
 
-            output.seek(SeekFrom::End(-(AvbFooter::SIZE as i64)))?;
+            zero_end = output.seek(SeekFrom::Start(
+                (self.source_boot_image.data.len() - AvbFooter::SIZE) as u64,
+            ))?;
             output.write_all(&avb_info.avb_footer.patch(total_size, avb_header_off))?;
         }
+
+        output.seek(SeekFrom::Start(zero_start))?;
+        output.write_zeros((zero_end - zero_start) as usize)?;
 
         // Patch header
 
@@ -347,11 +356,5 @@ impl<'a> BootImagePatchOption<'a> {
         output.flush()?;
 
         Ok(())
-    }
-}
-
-impl BootImageOutput for File {
-    fn truncate(&mut self, size: u64) -> std::io::Result<()> {
-        self.set_len(size)
     }
 }
