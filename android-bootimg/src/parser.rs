@@ -13,6 +13,7 @@ use paste::paste;
 use std::fmt::{Display, Formatter};
 use std::io::Write;
 use std::slice::Iter;
+use std::str::from_utf8;
 
 const BOOT_MAGIC: &[u8] = b"ANDROID!";
 const VENDOR_BOOT_MAGIC: &[u8] = b"VNDRBOOT";
@@ -430,8 +431,12 @@ impl VendorRamdiskEntry<'_> {
         self.data
     }
 
-    pub fn get_name(&self) -> &[u8] {
+    pub fn get_name_raw(&self) -> &[u8] {
         trim_end(self.entry.get_ramdisk_name())
+    }
+
+    pub fn get_name(&self) -> anyhow::Result<&str> {
+        Ok(from_utf8(trim_end(self.entry.get_ramdisk_name()))?)
     }
 
     pub fn get_entry_type(&self) -> VendorRamdiskTableEntryType {

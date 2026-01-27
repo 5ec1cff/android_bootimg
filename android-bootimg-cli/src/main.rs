@@ -79,7 +79,7 @@ fn main() -> Result<()> {
                 println!("vendor ramdisk table");
                 for i in 0..ramdisk.get_vendor_ramdisk_num() {
                     let entry = ramdisk.get_vendor_ramdisk(i).unwrap();
-                    if let Ok(name) = from_utf8(entry.get_name()) {
+                    if let Ok(name) = from_utf8(entry.get_name_raw()) {
                         println!("name: {}", name);
                         println!("type: {:?}", entry.get_entry_type());
                         dump_block_to_file!(entry, &format!("vendor.{}.cpio", name));
@@ -88,7 +88,7 @@ fn main() -> Result<()> {
                         let cpio = android_bootimg::cpio::Cpio::load_from_data(data.as_slice())?;
                         cpio.ls("/", true);
                     } else {
-                        println!("invalid ramdisk name: {:?}", entry.get_name());
+                        println!("invalid ramdisk name: {:?}", entry.get_name_raw());
                     }
                 }
             } else {
@@ -113,7 +113,7 @@ fn main() -> Result<()> {
                         println!("adding vendor ramdisk");
                         for i in 0..ramdisk.get_vendor_ramdisk_num() {
                             let entry = ramdisk.get_vendor_ramdisk(i).unwrap();
-                            let name = from_utf8(entry.get_name())?;
+                            let name = from_utf8(entry.get_name_raw())?;
                             println!("name: {}", name);
                             patcher.replace_vendor_ramdisk(
                                 i,
