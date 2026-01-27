@@ -315,6 +315,7 @@ define_boot_header_layout! {
         page_size,
         ramdisk_size,
         header_version,
+        dtb_size,
     },
     sfields {
         cmdline,
