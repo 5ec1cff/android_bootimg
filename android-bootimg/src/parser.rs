@@ -147,7 +147,6 @@ impl<'a> BootHeader<'a> {
 
     pub fn hdr_space(&self) -> usize {
         // TODO: only vendor boot has page count > 1
-        println!("ver: {:?}", self.version);
         align_to(self.layout.total_size as usize, self.page_size())
     }
 
@@ -293,7 +292,6 @@ impl<'a> BootImageBlocks<'a> {
                             let size = block_size as usize;
                             if size > 0 {
                                 if let Some(slice) = data.get(off..off + size) {
-                                    println!("block {} at off {} sz {}", stringify!($name), off, block_size);
                                     off += align_to(size, page_size);
                                     Some(slice)
                                 } else {

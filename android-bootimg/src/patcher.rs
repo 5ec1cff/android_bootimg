@@ -105,7 +105,6 @@ impl<'a> BootImagePatchOption<'a> {
         output
             .write_all(&self.source_boot_image.data[..self.source_boot_image.header.hdr_space()])?;
         pos += self.source_boot_image.header.hdr_space() as u64;
-        println!("header space {}", pos);
 
         let kernel_off = pos;
         let kernel_source: Option<(Box<dyn Read>, bool)> =
@@ -142,13 +141,9 @@ impl<'a> BootImagePatchOption<'a> {
             0
         };
 
-        println!("kernel off {} sz {} pos {}", kernel_off, kernel_size, pos);
-
         file_align!();
 
         let ramdisk_off = pos;
-
-        println!("writing ramdisk");
 
         let (ramdisk_size, vendor_ramdisk_table) = if let Some(vendor_ramdisk_table) = self
             .source_boot_image
@@ -173,7 +168,6 @@ impl<'a> BootImagePatchOption<'a> {
             }
 
             for (index, entry) in vendor_ramdisk_table.iter_mut().enumerate() {
-                println!("appending vendor ramdisk {index}");
                 let (mut ramdisk_source, compressed): (Box<dyn Read>, bool) =
                     if let Some(payload) = self.replace_vendor_ramdisk.remove(&index) {
                         (payload.data, payload.compressed)
@@ -208,10 +202,8 @@ impl<'a> BootImagePatchOption<'a> {
             }
             let ramdisk_source: Option<(Box<dyn Read>, bool)> =
                 if let Some(payload) = self.replace_ramdisk {
-                    println!("using replace_ramdisk compressed={}", payload.compressed);
                     Some((payload.data, payload.compressed))
                 } else if let Some(ramdisk) = &self.source_boot_image.blocks.ramdisk {
-                    println!("using source ramdisk");
                     Some((Box::new(ramdisk.data), true))
                 } else {
                     None
@@ -227,8 +219,6 @@ impl<'a> BootImagePatchOption<'a> {
                         bail!("Could not determine compression format of ramdisk");
                     }
                 };
-
-                println!("new ramdisk format {:?}", format);
 
                 if format == CompressFormat::UNKNOWN {
                     std::io::copy(&mut ramdisk_source, output)?;
@@ -246,11 +236,6 @@ impl<'a> BootImagePatchOption<'a> {
 
             (ramdisk_size, None)
         };
-
-        println!(
-            "ramdisk off {} sz {} pos {}",
-            ramdisk_off, ramdisk_size, pos
-        );
 
         file_align!();
 
