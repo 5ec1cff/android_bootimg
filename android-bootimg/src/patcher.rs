@@ -216,7 +216,8 @@ impl<'a> BootImagePatchOption<'a> {
                     if let Some(orig) = &self.source_boot_image.blocks.ramdisk {
                         orig.compress_format
                     } else {
-                        bail!("Could not determine compression format of ramdisk");
+                        // https://github.com/topjohnwu/Magisk/blob/0919db6b111db6f59dd24889fa4f90b141ea4148/native/src/boot/bootimg.cpp#L852C14-L857
+                        CompressFormat::LZ4_LEGACY
                     }
                 };
 
