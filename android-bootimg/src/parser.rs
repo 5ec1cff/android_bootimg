@@ -8,9 +8,11 @@ use crate::layouts::{
 use crate::parser::BootImageVersion::{Android, Vendor};
 use crate::utils::{SliceExt, align_to, trim_end};
 use anyhow::bail;
+use itertools::Itertools;
 use paste::paste;
 use std::fmt::{Display, Formatter};
 use std::io::Write;
+use std::slice::Iter;
 
 const BOOT_MAGIC: &[u8] = b"ANDROID!";
 const VENDOR_BOOT_MAGIC: &[u8] = b"VNDRBOOT";
@@ -247,6 +249,13 @@ impl RamdiskImage<'_> {
         self.vendor_ramdisk_table
             .as_ref()
             .and_then(|t| t.get(index))
+    }
+
+    pub fn iter_vendor_ramdisk(&self) -> Iter<'_, VendorRamdiskEntry<'_>> {
+        self.vendor_ramdisk_table
+            .as_ref()
+            .map(|v| v.iter())
+            .unwrap_or_default()
     }
 }
 
