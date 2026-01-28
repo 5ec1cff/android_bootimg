@@ -98,15 +98,20 @@ impl Cpio {
                 }
                 continue;
             }
-            let mut file_data = vec![0u8; file_size as usize];
-            cursor.read_exact(&mut file_data)?;
+            let data = if file_size == 0 {
+                None
+            } else {
+                let mut file_data = vec![0u8; file_size as usize];
+                cursor.read_exact(&mut file_data)?;
+                Some(file_data)
+            };
             let entry = Box::new(CpioEntry {
                 mode,
                 uid,
                 gid,
                 rdev_major,
                 rdev_minor,
-                data: Some(Box::new(file_data)),
+                data: data.map(|d| Box::new(d) as Box<dyn AsRef<[u8]>>),
             });
             cpio.entries.insert(name, entry);
             cursor.set_position(align_to(cursor.position(), 4));
@@ -114,12 +119,12 @@ impl Cpio {
         Ok(cpio)
     }
 
-    pub fn dump(&self, output: &mut dyn Write) -> Result<()> {
-        let mut output = output;
+    pub fn dump(&self, mut output: &mut dyn Write) -> Result<()> {
         let mut pos = 0usize;
         let mut inode = 300000i64;
+
         for (name, entry) in &self.entries {
-            pos += output.write(
+            pos += output.write_all_size(
                 format!(
                     "070701{:08x}{:08x}{:08x}{:08x}{:08x}{:08x}{:08x}{:08x}{:08x}{:08x}{:08x}{:08x}{:08x}",
                     inode,
@@ -137,24 +142,22 @@ impl Cpio {
                     0
                 ).as_bytes(),
             )?;
-            pos += output.write(name.as_bytes())?;
-            pos += output.write(&[0])?;
-            output.write_zeros(align_to(pos, 4) - pos)?;
-            pos = align_to(pos, 4);
+            pos += output.write_all_size(name.as_bytes())?;
+            pos += output.write_all_size(&[0])?;
+            pos += output.write_zeros(align_to(pos, 4) - pos)?;
             if let Some(data) = entry.data.as_ref() {
-                pos += output.write(data.as_ref().as_ref())?;
-                output.write_zeros(align_to(pos, 4))?;
-                pos = align_to(pos, 4);
+                pos += output.write_all_size(data.as_ref().as_ref())?;
+                pos += output.write_zeros(align_to(pos, 4) - pos)?;
             }
             inode += 1;
         }
-        pos += output.write(
+        pos += output.write_all_size(
             format!("070701{:08x}{:08x}{:08x}{:08x}{:08x}{:08x}{:08x}{:08x}{:08x}{:08x}{:08x}{:08x}{:08x}",
                     inode, 0o755, 0, 0, 1, 0, 0, 0, 0, 0, 0, 11, 0
             ).as_bytes()
         )?;
-        pos += output.write("TRAILER!!!\0".as_bytes())?;
-        output.write_zeros(align_to(pos, 4))?;
+        pos += output.write_all_size("TRAILER!!!\0".as_bytes())?;
+        output.write_zeros(align_to(pos, 4) - pos)?;
         Ok(())
     }
 

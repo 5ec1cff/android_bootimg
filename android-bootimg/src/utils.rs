@@ -33,23 +33,31 @@ impl<T: Read> ReadExt for T {
 
 pub trait WriteExt {
     #[allow(unused)]
-    fn write_zeros(&mut self, len: usize) -> io::Result<()>;
+    fn write_zeros(&mut self, len: usize) -> io::Result<usize>;
     fn write_pod<F: Pod>(&mut self, data: &F) -> io::Result<()>;
+
+    fn write_all_size(&mut self, data: &[u8]) -> io::Result<usize>;
 }
 
 impl<T: Write> WriteExt for T {
-    fn write_zeros(&mut self, mut len: usize) -> io::Result<()> {
+    fn write_zeros(&mut self, mut len: usize) -> io::Result<usize> {
         let buf = [0_u8; 4096];
+        let orig_len = len;
         while len > 0 {
             let l = min(buf.len(), len);
             self.write_all(&buf[..l])?;
             len -= l;
         }
-        Ok(())
+        Ok(orig_len)
     }
 
     fn write_pod<F: Pod>(&mut self, data: &F) -> io::Result<()> {
         self.write_all(bytes_of(data))
+    }
+
+    fn write_all_size(&mut self, data: &[u8]) -> io::Result<usize> {
+        self.write_all(data)?;
+        Ok(data.len())
     }
 }
 
