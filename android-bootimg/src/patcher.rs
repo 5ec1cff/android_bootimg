@@ -106,6 +106,20 @@ impl<'a> BootImagePatchOption<'a> {
             .write_all(&self.source_boot_image.data[..self.source_boot_image.header.hdr_space()])?;
         pos += self.source_boot_image.header.hdr_space() as u64;
 
+        if let Some(cmdline) = self.override_cmdline {
+            output.seek(SeekFrom::Start(header_off + self.source_boot_image.header.layout.offset_cmdline as u64))?;
+            let cmdline_size = self.source_boot_image.header.layout.size_cmdline;
+            if cmdline.len() > cmdline_size as usize {
+                bail!("provided cmdline is too long: max {cmdline_size}, got {}", cmdline.len());
+            }
+            output.write_all(cmdline)?;
+            output.write_zeros(cmdline_size as usize - cmdline.len() as usize)?;
+            // TODO: support write extra_cmdline (only old headers)
+            output.seek(SeekFrom::Start(pos))?;
+        }
+
+        // TODO: support override os version
+
         let kernel_off = pos;
         let kernel_source: Option<(Box<dyn Read>, bool)> =
             if let Some(payload) = self.replace_kernel {
