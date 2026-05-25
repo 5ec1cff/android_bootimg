@@ -293,7 +293,9 @@ impl<'a> BootImagePatchOption<'a> {
             }
 
             pos = output.seek(SeekFrom::Current(0))?;
-            pos - vendor_ramdisk_table_off
+            let table_size = pos - vendor_ramdisk_table_off;
+            file_align!();
+            table_size
         } else {
             0
         };
