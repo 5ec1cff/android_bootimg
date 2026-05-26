@@ -326,8 +326,11 @@ impl<'a> BootImagePatchOption<'a> {
             output.write_all(&avb_info.avb_footer.patch(total_size, avb_header_off))?;
         }
 
+        // Some incomplete boot image file is smaller than the real partition size, so zero_len can be smaller than zero_start
+        if zero_start < zero_end {
         output.seek(SeekFrom::Start(zero_start))?;
         output.write_zeros((zero_end - zero_start) as usize)?;
+        }
 
         // Patch header
 
