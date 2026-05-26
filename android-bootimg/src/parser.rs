@@ -524,4 +524,8 @@ impl<'a> BootImage<'a> {
     pub fn get_blocks(&self) -> &BootImageBlocks<'_> {
         &self.blocks
     }
+
+    pub fn get_size(&self) -> usize {
+        self.data.len()
+    }
 }
