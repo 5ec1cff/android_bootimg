@@ -84,6 +84,7 @@ impl<'a> BootImagePatchOption<'a> {
         output.seek(SeekFrom::Start(0))?;
 
         let mut pos: u64 = 0;
+        let page_size = self.source_boot_image.header.page_size();
         macro_rules! file_align_with {
             ($e:expr) => {
                 let new_pos = align_to(pos, $e);
@@ -97,7 +98,7 @@ impl<'a> BootImagePatchOption<'a> {
 
         macro_rules! file_align {
             () => {
-                file_align_with!(self.source_boot_image.header.page_size() as u64);
+                file_align_with!(page_size as u64);
             };
         }
 
@@ -305,14 +306,26 @@ impl<'a> BootImagePatchOption<'a> {
         // Copy and patch AVB
 
         let mut zero_start = pos;
-        let mut zero_end = self.source_boot_image.data.len() as u64;
+        let boot_image_len = self.source_boot_image.data.len();
+        let mut zero_end = boot_image_len as u64;
 
         if let Some(avb_info) = self.source_boot_image.avb_info.as_ref() {
+            let mut min_size = pos as usize;
+            let avb_tail_len = avb_info.avb_tail.map_or(0, |t| t.len());
+            min_size += align_to(avb_tail_len, page_size);
+            min_size = align_to(min_size, 4096);
+            let avb_header_len = avb_info.avb_header.len();
+            min_size += avb_header_len;
+            min_size += AvbFooter::SIZE;
+            if min_size > boot_image_len {
+                bail!("no space left for avb structures: boot_image_len={boot_image_len}, payload_len={pos}, avb_tail_len={avb_tail_len}, avb_header_len={avb_header_len}");
+            }
+
             if let Some(avb_tail) = avb_info.avb_tail {
                 output.write_all(avb_tail)?;
                 pos = output.seek(SeekFrom::Current(0))?;
+                file_align!();
             }
-            file_align!();
 
             let total_size = pos;
             file_align_with!(4096);
@@ -328,8 +341,8 @@ impl<'a> BootImagePatchOption<'a> {
 
         // Some incomplete boot image file is smaller than the real partition size, so zero_len can be smaller than zero_start
         if zero_start < zero_end {
-        output.seek(SeekFrom::Start(zero_start))?;
-        output.write_zeros((zero_end - zero_start) as usize)?;
+            output.seek(SeekFrom::Start(zero_start))?;
+            output.write_zeros((zero_end - zero_start) as usize)?;
         }
 
         // Patch header
