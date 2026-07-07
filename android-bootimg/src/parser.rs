@@ -1,11 +1,9 @@
 use crate::compress::{CompressFormat, get_decoder, parse_compress_format};
 use crate::constants::{AVB_FOOTER_MAGIC, AVB_MAGIC};
 use crate::layouts::{
-    AvbFooter, BOOT_HEADER_V0, BOOT_HEADER_V1, BOOT_HEADER_V2, BOOT_HEADER_V3, BOOT_HEADER_V4,
-    BootHeaderLayout, VENDOR_BOOT_HEADER_V3, VENDOR_BOOT_HEADER_V4, VendorRamdiskTableEntryType,
-    VendorRamdiskTableEntryV4,
+    AvbFooter, BOOT_HEADER_V0, BOOT_HEADER_V1, BOOT_HEADER_V2, BOOT_HEADER_V3, BOOT_HEADER_V4, BootHeaderLayout, DEFAULT_LAYOUT, VENDOR_BOOT_HEADER_V3, VENDOR_BOOT_HEADER_V4, VendorRamdiskTableEntryType, VendorRamdiskTableEntryV4,
 };
-use crate::parser::BootImageVersion::{Android, Vendor};
+use crate::parser::BootImageVersion::{Android, RawRamdisk, Vendor};
 use crate::utils::{SliceExt, align_to, trim_end};
 use anyhow::bail;
 use paste::paste;
@@ -44,6 +42,7 @@ impl Display for PatchLevel {
 pub enum BootImageVersion {
     Android(u32),
     Vendor(u32),
+    RawRamdisk,
 }
 
 pub struct BootHeader<'a> {
@@ -87,7 +86,7 @@ macro_rules! impl_sfield_accessor {
 
 impl<'a> BootHeader<'a> {
     impl_ifield_accessor! { pub, u32, kernel_size }
-    impl_ifield_accessor! { pub, u32, ramdisk_size }
+    impl_ifield_accessor! { pub, u32, ramdisk_size, _raw }
     impl_ifield_accessor! { pub, u32, second_size }
     impl_ifield_accessor! { pub, u32, page_size }
     impl_ifield_accessor! { pub, u32, header_version }
@@ -106,6 +105,20 @@ impl<'a> BootHeader<'a> {
     impl_sfield_accessor! { pub, id }
     impl_sfield_accessor! { pub, extra_cmdline }
 
+    pub fn has_ramdisk_size(&self) -> bool {
+        match self.version {
+            RawRamdisk => true,
+            _ => self.has_ramdisk_size_raw(),
+        }
+    }
+
+    pub fn get_ramdisk_size(&self) -> u32 {
+        match self.version {
+            RawRamdisk => self.data.len() as u32,
+            _ => self.get_ramdisk_size_raw(),
+        }
+    }
+
     pub fn get_layout(&self) -> &'static BootHeaderLayout {
         self.layout
     }
@@ -115,6 +128,9 @@ impl<'a> BootHeader<'a> {
     }
 
     pub fn get_os_version(&self) -> Option<(OsVersion, PatchLevel)> {
+        if matches!(self.version, RawRamdisk) {
+            return None;
+        }
         let version = self.get_os_version_raw();
         if version == 0 {
             return None;
@@ -138,6 +154,9 @@ impl<'a> BootHeader<'a> {
                 if v >= 3 {
                     return 4096;
                 }
+            }
+            RawRamdisk => {
+                return 1;
             }
             _ => {}
         }
@@ -189,6 +208,14 @@ impl<'a> BootHeader<'a> {
             }
         }
         bail!("invalid boot image")
+    }
+
+    pub fn parse_raw_ramdisk(data: &'a [u8]) -> Self {
+        Self {
+            data,
+            layout: &DEFAULT_LAYOUT,
+            version: RawRamdisk,
+        }
     }
 }
 
@@ -514,6 +541,18 @@ impl<'a> BootImage<'a> {
             header,
             blocks,
             avb_info,
+        })
+    }
+
+    pub fn parse_raw_ramdisk(data: &'a [u8]) -> anyhow::Result<Self> {
+        let header = BootHeader::parse_raw_ramdisk(data);
+        let (blocks, _) = BootImageBlocks::parse(data, &header)?;
+
+        Ok(Self {
+            data,
+            header,
+            blocks,
+            avb_info: None,
         })
     }
 

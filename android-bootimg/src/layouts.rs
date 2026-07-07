@@ -23,7 +23,7 @@ macro_rules! def_boot_header_layout {
             }
 
             #[allow(unused)]
-            const DEFAULT_LAYOUT: BootHeaderLayout = BootHeaderLayout {
+            pub const DEFAULT_LAYOUT: BootHeaderLayout = BootHeaderLayout {
                 name: "default",
                 $(
                     [<offset_ $name>]: 0,
