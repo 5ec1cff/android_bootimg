@@ -101,11 +101,14 @@ fn main() -> Result<()> {
             }
         }
 
-        if let Some(s2) = env::args().skip(2).next() {
+        if let Some(s2) = env::args().nth(2) {
             if s2 == "--patch" {
                 let mut patcher = BootImagePatchOption::new(&boot);
-                if blocks.get_kernel().is_some() {
-                    println!("adding kernel");
+                if let Some(new_kernel_path) = env::args().nth(3) {
+                    println!("Replacing kernel with: {}", new_kernel_path);
+                    patcher.replace_kernel(Box::new(File::open(new_kernel_path)?), false);
+                } else if blocks.get_kernel().is_some() {
+                    println!("No new kernel provided. Reusing the original kernel.");
                     patcher.replace_kernel(Box::new(File::open("kernel")?), false);
                 }
                 if let Some(ramdisk) = blocks.get_ramdisk() {
